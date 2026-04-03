@@ -64,6 +64,8 @@ bot.use(async (ctx, next) => {
                 } else if (ctx.callbackQuery && ctx.callbackQuery.data === "check_sub") {
                     await ctx.answerCallbackQuery({ text: "✅ Thank you for joining! You can now use the bot.", show_alert: true });
                     await ctx.deleteMessage().catch(e => {});
+                    const menu = (user && (user.isAdmin || user.isMainAdmin)) ? adminMenu : userMenu;
+                    await ctx.reply(`Hello ${ctx.from.first_name}! Welcome to the bot.`, { reply_markup: menu });
                     return;
                 }
             }
