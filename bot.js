@@ -1,9 +1,11 @@
 const { Bot, InputFile } = require("grammy");
 const mongoose = require('mongoose');
+const express = require('express');
 const { User, Video } = require('./database');
 const { BOT_TOKEN, MONGO_URI, MAIN_ADMIN_ID, ADMIN_PASS } = require('./config');
 const { userMenu, adminMenu } = require('./keyboard');
 
+const app = express();
 const bot = new Bot(BOT_TOKEN);
 
 mongoose.connect(MONGO_URI).then(() => {
@@ -15,6 +17,9 @@ mongoose.connect(MONGO_URI).then(() => {
         { command: "send", description: "Broadcast message (Admin)" },
         { command: "addcredit", description: "Add User Credits (Admin)" }
     ]).catch(e => console.log("Failed to set commands:", e));
+}).catch(err => {
+    console.error("Database connection failed:", err.message);
+    console.error("Hint: Make sure your MongoDB IP Access List is set to 'Allow Access From Anywhere' (0.0.0.0/0).");
 });
 // --- GLOBAL REACTION MIDDLEWARE ---
 bot.use(async (ctx, next) => {
@@ -363,6 +368,16 @@ bot.on("message:text", async (ctx) => {
             await ctx.reply("❌ This ID was not found in the database. Ensure the ID has started the bot via /start.");
         }
     }
+});
+
+// --- EXPRESS SERVER PREVENTS RENDER CRASH & BOT START ---
+app.get('/', (req, res) => {
+    res.send('Bot is running!');
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Web server is listening on port ${PORT}`);
 });
 
 bot.start();
