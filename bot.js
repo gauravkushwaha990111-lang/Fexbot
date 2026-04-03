@@ -231,7 +231,7 @@ bot.hears("🎁 Daily Reward", async (ctx) => {
 });
 
 // --- USER/ADMIN STATS ---
-bot.hears("👥 My Stats", async (ctx) => {
+bot.hears("👥 My Stats/Refer", async (ctx) => {
     const user = await User.findOne({ userId: ctx.from.id });
     const refLink = `https://t.me/${bot.botInfo.username}?start=${ctx.from.id}`;
     await ctx.reply(`📊 *Your Stats:*\n\n📺 Videos Watched: ${user.videosWatched}\n👥 Total Referrals: ${user.referCount}\n\n🔗 *Ref Link:* \`${refLink}\``, { parse_mode: "Markdown" });
