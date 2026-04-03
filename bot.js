@@ -97,7 +97,7 @@ bot.use(async (ctx, next) => {
         const statusMsg = await ctx.reply("⏳ Broadcasting... Please do not send any messages until it is completed.");
         for (let u of all) {
             try {
-                await ctx.api.copyMessage(u.userId, ctx.chat.id, ctx.message.message_id);
+                await ctx.api.copyMessage(u.userId, ctx.chat.id, ctx.message.message_id, { protect_content: true });
                 count++;
             } catch (e) { }
         }
@@ -208,7 +208,10 @@ bot.hears("📺 Watch Video", async (ctx) => {
         }
     }
 
-    const sentMsg = await ctx.replyWithVideo(video[0].fileId, { message_effect_id: "5104841245755180586" });
+    const sentMsg = await ctx.replyWithVideo(video[0].fileId, { 
+        message_effect_id: "5104841245755180586",
+        protect_content: true 
+    });
     try { await bot.api.setMessageReaction(ctx.chat.id, sentMsg.message_id, [{ type: "emoji", emoji: "🔥" }]); } catch (e) { }
 });
 
