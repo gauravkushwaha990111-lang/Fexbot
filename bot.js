@@ -1,15 +1,24 @@
-const { Bot, InputFile } = require("grammy");
+const { Bot, InputFile, InlineKeyboard } = require("grammy");
 const mongoose = require('mongoose');
 const express = require('express');
-const { User, Video } = require('./database');
+const { User, Video, Channel } = require('./database');
 const { BOT_TOKEN, MONGO_URI, MAIN_ADMIN_ID, ADMIN_PASS } = require('./config');
 const { userMenu, adminMenu } = require('./keyboard');
 
 const app = express();
 const bot = new Bot(BOT_TOKEN);
 
-mongoose.connect(MONGO_URI).then(() => {
+mongoose.connect(MONGO_URI).then(async () => {
     console.log("Database Connected!");
+
+    const chCount = await Channel.countDocuments();
+    if (chCount === 0) {
+        const defaultChannels = ["@devflins", "@flinsbots", "@fexh4b"];
+        for (let ch of defaultChannels) {
+            await Channel.create({ username: ch });
+        }
+    }
+
     bot.api.setMyCommands([
         { command: "start", description: "Start the bot" },
         { command: "find", description: "Search User Details (Admin)" },
@@ -23,6 +32,44 @@ mongoose.connect(MONGO_URI).then(() => {
 });
 // --- GLOBAL REACTION MIDDLEWARE ---
 bot.use(async (ctx, next) => {
+    if (!ctx.from) return next();
+
+    const user = await User.findOne({ userId: ctx.from.id });
+    if (!user || (!user.isAdmin && !user.isMainAdmin)) {
+        if ((ctx.message || ctx.callbackQuery) && (!ctx.callbackQuery || ctx.callbackQuery.data === 'check_sub')) {
+            const channels = await Channel.find();
+            if (channels.length > 0) {
+                let notJoined = [];
+                for (let ch of channels) {
+                    try {
+                        const member = await ctx.api.getChatMember(ch.username, ctx.from.id);
+                        if (['left', 'kicked'].includes(member.status)) notJoined.push(ch.username);
+                    } catch (e) {
+                        notJoined.push(ch.username);
+                    }
+                }
+
+                if (notJoined.length > 0) {
+                    if (ctx.callbackQuery && ctx.callbackQuery.data === "check_sub") {
+                        return ctx.answerCallbackQuery({ text: "❌ You have not joined all channels yet!", show_alert: true });
+                    }
+                    const keyboard = new InlineKeyboard();
+                    notJoined.forEach(ch => keyboard.url(`Join ${ch}`, `https://t.me/${ch.replace('@', '')}`).row());
+                    keyboard.text("✅ I have joined", "check_sub");
+
+                    return ctx.reply("⛔️ *Access Denied!*\n\nYou must join all our official channels to use this bot.\nIf you leave any of them, you will lose access.", {
+                        reply_markup: keyboard,
+                        parse_mode: "Markdown"
+                    });
+                } else if (ctx.callbackQuery && ctx.callbackQuery.data === "check_sub") {
+                    await ctx.answerCallbackQuery({ text: "✅ Thank you for joining! You can now use the bot.", show_alert: true });
+                    await ctx.deleteMessage().catch(e => {});
+                    return;
+                }
+            }
+        }
+    }
+
     if (ctx.message && ctx.message.text) {
         try {
             const emojis = ["❤", "🔥", "👀", "🕊️"];
@@ -281,6 +328,48 @@ bot.command("addcredit", async (ctx) => {
     try { await bot.api.sendMessage(targetId, `🎁 Admin has added ${amount} credits to your account! New balance: ${target.credits}`); } catch (e) { }
 });
 
+// --- MANAGE CHANNELS (ADMIN ONLY) ---
+bot.hears("📢 Manage Channels", async (ctx) => {
+    const user = await User.findOne({ userId: ctx.from.id });
+    if (!user || (!user.isAdmin && !user.isMainAdmin)) return;
+    
+    const channels = await Channel.find();
+    let text = "📢 *Mandatory Channels:*\n\n";
+    channels.forEach((ch, idx) => text += `${idx + 1}. ${ch.username}\n`);
+    text += "\n*Commands:*\n`/addchannel @username` - Add new channel\n`/delchannel @username` - Remove channel";
+    
+    await ctx.reply(text, { parse_mode: "Markdown" });
+});
+
+bot.command("addchannel", async (ctx) => {
+    const user = await User.findOne({ userId: ctx.from.id });
+    if (!user || (!user.isAdmin && !user.isMainAdmin)) return;
+    
+    let username = ctx.match.trim();
+    if (!username) return ctx.reply("Usage: `/addchannel @username`", { parse_mode: "Markdown" });
+    if (!username.startsWith('@')) username = '@' + username;
+    
+    try {
+        await Channel.create({ username });
+        await ctx.reply(`✅ Successfully added ${username} to forced channels list!`);
+    } catch (e) {
+        await ctx.reply("❌ Error: Channel might already exist.");
+    }
+});
+
+bot.command("delchannel", async (ctx) => {
+    const user = await User.findOne({ userId: ctx.from.id });
+    if (!user || (!user.isAdmin && !user.isMainAdmin)) return;
+
+    let username = ctx.match.trim();
+    if (!username) return ctx.reply("Usage: `/delchannel @username`", { parse_mode: "Markdown" });
+    if (!username.startsWith('@')) username = '@' + username;
+
+    const deleted = await Channel.findOneAndDelete({ username });
+    if (deleted) await ctx.reply(`🗑️ Removed ${username} from forced channels list!`);
+    else await ctx.reply("❌ Channel not found.");
+});
+
 // --- ALL VIDEOS (ADMIN ONLY) ---
 bot.hears("🎥 All Videos", async (ctx) => {
     const user = await User.findOne({ userId: ctx.from.id });
@@ -306,8 +395,15 @@ bot.command("delvideo", async (ctx) => {
     const user = await User.findOne({ userId: ctx.from.id });
     if (!user || (!user.isAdmin && !user.isMainAdmin)) return;
 
+    if (ctx.message.reply_to_message && ctx.message.reply_to_message.video) {
+        const fileUniqueId = ctx.message.reply_to_message.video.file_unique_id;
+        const deleted = await Video.findOneAndDelete({ uniqueId: fileUniqueId });
+        if (deleted) return ctx.reply("🗑️ Video has been removed from the database!");
+        else return ctx.reply("❌ This video was not found in the database.");
+    }
+
     const objId = ctx.match.trim();
-    if (!objId) return ctx.reply("Usage: /delvideo <ID>");
+    if (!objId) return ctx.reply("Usage: /delvideo <ID> or reply to a video message with /delvideo");
 
     try {
         const deleted = await Video.findByIdAndDelete(objId);

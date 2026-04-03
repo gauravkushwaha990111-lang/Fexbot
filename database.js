@@ -21,7 +21,12 @@ const VideoSchema = new mongoose.Schema({
     uniqueId: { type: String, unique: true }
 });
 
+const ChannelSchema = new mongoose.Schema({
+    username: { type: String, unique: true }
+});
+
 const User = mongoose.model('User', UserSchema);
 const Video = mongoose.model('Video', VideoSchema);
+const Channel = mongoose.model('Channel', ChannelSchema);
 
-module.exports = { User, Video };
+module.exports = { User, Video, Channel };
