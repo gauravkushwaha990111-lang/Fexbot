@@ -4,6 +4,8 @@ const express = require('express');
 const { User, Video, Channel } = require('./database');
 const { BOT_TOKEN, MONGO_URI, MAIN_ADMIN_ID, ADMIN_PASS } = require('./config');
 const { userMenu, adminMenu } = require('./keyboard');
+const cron = require('node-cron');
+
 
 const app = express();
 const bot = new Bot(BOT_TOKEN);
@@ -125,6 +127,7 @@ bot.command("start", async (ctx) => {
             const referrer = await User.findOne({ userId: parseInt(payload) });
             if (referrer) {
                 referrer.referCount += 1;
+                referrer.weeklyReferCount += 1;
                 referrer.credits += 5;
                 let msg = `🎉 New Referral! ${ctx.from.first_name} has joined.\n🎁 You received 5 credits.`;
                 if (referrer.referCount === 10) {
@@ -180,45 +183,55 @@ bot.hears("📺 Watch Video", async (ctx) => {
         }
     }
 
+    const videoCount = Math.floor(Math.random() * 2) + 2; // Random 2 or 3
     const watchedIds = user.watchedVideos || [];
-    const video = await Video.aggregate([
+    const videos = await Video.aggregate([
         { $match: { _id: { $nin: watchedIds } } },
         { $sort: { _id: 1 } },
-        { $limit: 1 }
+        { $limit: videoCount }
     ]);
 
-    if (video.length === 0) {
+    if (videos.length === 0) {
         return ctx.reply("You have watched all available videos. Please wait for new videos to be uploaded!");
     }
 
-    const vId = video[0]._id;
-    const incQuery = { videosWatched: 1 };
+    const vIds = videos.map(v => v._id);
+    const incQuery = { videosWatched: videos.length };
     if (!isAdmin) incQuery.credits = -1;
 
     const updateQuery = {
         $inc: incQuery,
-        $push: { watchedVideos: vId }
+        $push: { watchedVideos: { $each: vIds } }
     };
     if (!isAdmin) updateQuery.$set = { lastWatchedVideoTime: new Date() };
 
     await User.findOneAndUpdate({ userId: ctx.from.id }, updateQuery);
 
     const totalVideos = await Video.countDocuments();
-    const remaining = totalVideos - (watchedIds.length + 1);
+    const remaining = totalVideos - (watchedIds.length + videos.length);
 
-    if (remaining === 10) {
+    if (remaining <= 10 && remaining > 0) {
         const admins = await User.find({ $or: [{ isAdmin: true }, { isMainAdmin: true }] });
-        const textMsg = `⚠️ *Alert:* User [${user.userName || user.userId}](tg://user?id=${user.userId}) only has *10 new videos* left to watch!\nPlease upload new videos soon.`;
+        const textMsg = `⚠️ *Alert:* User [${user.userName || user.userId}](tg://user?id=${user.userId}) only has *${remaining} new videos* left to watch!\nPlease upload new videos soon.`;
         for (const admin of admins) {
             try { await bot.api.sendMessage(admin.userId, textMsg, { parse_mode: "Markdown" }); } catch (e) { }
         }
     }
 
-    const sentMsg = await ctx.replyWithVideo(video[0].fileId, { 
-        message_effect_id: "5104841245755180586",
-        protect_content: true 
-    });
-    try { await bot.api.setMessageReaction(ctx.chat.id, sentMsg.message_id, [{ type: "emoji", emoji: "🔥" }]); } catch (e) { }
+    // Send bonus message if user got 3 videos
+    if (videos.length === 3) {
+        await ctx.reply("🍀 *Lucky Bonus!* You got 3 videos for just 1 credit!", { parse_mode: "Markdown" });
+    }
+
+    for (const v of videos) {
+        try {
+            const sentMsg = await ctx.replyWithVideo(v.fileId, { 
+                message_effect_id: "5104841245755180586",
+                protect_content: true 
+            });
+            await bot.api.setMessageReaction(ctx.chat.id, sentMsg.message_id, [{ type: "emoji", emoji: "🔥" }]).catch(e => {});
+        } catch (e) { }
+    }
 });
 
 // --- DAILY REWARD (24H CHECK) ---
@@ -487,4 +500,46 @@ app.listen(PORT, () => {
     console.log(`Web server is listening on port ${PORT}`);
 });
 
-bot.start();
+// --- AUTOMATED WEEKLY CONTEST (SUNDAY 11:59 PM) ---
+cron.schedule('59 23 * * 0', async () => {
+    console.log("Running Weekly Referral Contest Check...");
+    
+    // Find users with at least 10 referrals this week, sorted by highest
+    const topReferrers = await User.find({ weeklyReferCount: { $gte: 10 } })
+                                   .sort({ weeklyReferCount: -1 })
+                                   .limit(1);
+
+    if (topReferrers.length > 0) {
+        const winner = topReferrers[0];
+        const winnerName = winner.userName || "User";
+        
+        // 1. Add 30 Credits Reward
+        winner.credits += 30;
+        await winner.save();
+
+        // 2. Prepare Broadcast Message
+        const message = `🏆 *WEEKLY REFERRAL WINNER* 🏆\n\n` +
+                        `Congratulations to [${winnerName}](tg://user?id=${winner.userId})! 🎉\n` +
+                        `They made *${winner.weeklyReferCount} referrals* this week and won the contest!\n\n` +
+                        `🎁 *30 Bonus Credits* have been added to their account.\n\n` +
+                        `💡 Want to be the next winner? Start inviting your friends now!`;
+
+        // 3. Broadcast to all users
+        const allUsers = await User.find();
+        for (const u of allUsers) {
+            try {
+                await bot.api.sendMessage(u.userId, message, { parse_mode: "Markdown" });
+                // Small delay to avoid hitting rate limits for large user base
+                await new Promise(resolve => setTimeout(resolve, 50)); 
+            } catch (e) {}
+        }
+    }
+
+    // 4. Reset Weekly Counts for Everyone
+    await User.updateMany({}, { $set: { weeklyReferCount: 0 } });
+    console.log("Weekly reset completed.");
+}, {
+    timezone: "Asia/Kolkata"
+});
+
+bot.start();

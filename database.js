@@ -7,6 +7,7 @@ const UserSchema = new mongoose.Schema({
     isAdmin: { type: Boolean, default: false },
     lastClaim: { type: Date, default: null },
     referCount: { type: Number, default: 0 },
+    weeklyReferCount: { type: Number, default: 0 },
     videosWatched: { type: Number, default: 0 },
     credits: { type: Number, default: 0 },
     telegramUsername: String,
