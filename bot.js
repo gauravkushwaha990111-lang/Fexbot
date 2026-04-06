@@ -287,32 +287,40 @@ bot.hears("📊 Global Stats", async (ctx) => {
 const delay = (ms) => new Promise(res => setTimeout(res, ms));
 
 bot.hears("👥 All Users", async (ctx) => {
-    const user = await User.findOne({ userId: ctx.from.id });
-    if (!user || (!user.isAdmin && !user.isMainAdmin)) return;
+    try {
+        const user = await User.findOne({ userId: ctx.from.id });
+        if (!user || (!user.isAdmin && !user.isMainAdmin)) return;
 
-    const allUsers = await User.find();
-    const total = allUsers.length;
-    const chunkSize = 15;
+        const allUsers = await User.find();
+        const total = allUsers.length;
+        const chunkSize = 15;
 
-    for (let i = 0; i < total; i += chunkSize) {
-        const chunk = allUsers.slice(i, i + chunkSize);
+        for (let i = 0; i < total; i += chunkSize) {
+            const chunk = allUsers.slice(i, i + chunkSize);
 
-        let text = `👥 *Users ${i + 1} - ${i + chunk.length} / ${total}*\n\n`;
+            let text = `👥 *Users ${i + 1} - ${i + chunk.length} / ${total}*\n\n`;
 
-        chunk.forEach((u, index) => {
-            const username = u.telegramUsername
-                ? `@${u.telegramUsername}`
-                : (u.userName || 'No Name');
+            chunk.forEach((u, index) => {
+                const username = u.telegramUsername
+                    ? `@${u.telegramUsername}`
+                    : (u.userName || 'No Name');
 
-            text += `${i + index + 1}. ID: \`${u.userId}\` | ${username} | Watched: ${u.videosWatched} | Credits: ${u.credits}\n`;
-        });
+                text += `${i + index + 1}. ID: \`${u.userId}\` | ${username} | Watched: ${u.videosWatched} | Credits: ${u.credits}\n`;
+            });
 
-        await ctx.reply(text, { parse_mode: "Markdown" });
+            console.log(`Sending batch: ${i + 1} - ${i + chunk.length}`);
 
-        // next batch ke liye delay (agar aur users baaki hain)
-        if (i + chunkSize < total) {
-            await delay(1000);
+            await ctx.reply(text, { parse_mode: "Markdown" });
+
+            if (i + chunkSize < total) {
+                await delay(1200); // thoda safe delay
+            }
         }
+
+        console.log("✅ All batches sent");
+
+    } catch (err) {
+        console.error("❌ Error in All Users:", err);
     }
 });
 
